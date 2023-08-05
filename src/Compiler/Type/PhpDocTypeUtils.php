@@ -2,6 +2,7 @@
 
 namespace ShipMonk\InputMapper\Compiler\Type;
 
+use Closure;
 use LogicException;
 use Nette\Utils\Arrays;
 use Nette\Utils\Reflection;
@@ -16,6 +17,9 @@ use PHPStan\PhpDocParser\Ast\ConstExpr\ConstExprNullNode;
 use PHPStan\PhpDocParser\Ast\ConstExpr\ConstExprStringNode;
 use PHPStan\PhpDocParser\Ast\ConstExpr\ConstExprTrueNode;
 use PHPStan\PhpDocParser\Ast\ConstExpr\ConstFetchNode;
+use PHPStan\PhpDocParser\Ast\PhpDoc\ExtendsTagValueNode;
+use PHPStan\PhpDocParser\Ast\PhpDoc\ImplementsTagValueNode;
+use PHPStan\PhpDocParser\Ast\PhpDoc\TemplateTagValueNode;
 use PHPStan\PhpDocParser\Ast\Type\ArrayShapeItemNode;
 use PHPStan\PhpDocParser\Ast\Type\ArrayShapeNode;
 use PHPStan\PhpDocParser\Ast\Type\ArrayTypeNode;
@@ -28,6 +32,9 @@ use PHPStan\PhpDocParser\Ast\Type\NullableTypeNode;
 use PHPStan\PhpDocParser\Ast\Type\ObjectShapeNode;
 use PHPStan\PhpDocParser\Ast\Type\TypeNode;
 use PHPStan\PhpDocParser\Ast\Type\UnionTypeNode;
+use PHPStan\PhpDocParser\Lexer\Lexer;
+use PHPStan\PhpDocParser\Parser\PhpDocParser;
+use PHPStan\PhpDocParser\Parser\TokenIterator;
 use ReflectionClass;
 use ReflectionIntersectionType;
 use ReflectionNamedType;
@@ -52,6 +59,7 @@ use function is_string;
 use function max;
 use function method_exists;
 use function str_contains;
+use function str_ends_with;
 use function strcasecmp;
 use function strtolower;
 
@@ -480,6 +488,8 @@ class PhpDocTypeUtils
      */
     private static function getGenericTypeDefinition(GenericTypeNode $type): array
     {
+
+
         return match ($type->type->name) {
             'array' => [
                 'superTypes' => static fn (array $types): array => [
@@ -530,6 +540,57 @@ class PhpDocTypeUtils
             ],
 
             default => [],
+        };
+    }
+
+    private static function fooBar(PhpDocParser $parser, Lexer $lexer, string $className): void
+    {
+        $reflectionClass = new ReflectionClass($className);
+        $phpDoc = $reflectionClass->getDocComment();
+        $tokens = new TokenIterator($lexer->tokenize($phpDoc));
+
+        $extends = $reflectionClass->getParentClass() !== false ? new IdentifierTypeNode($reflectionClass->getParentClass()->getName()) : null;
+        $implements = [];
+
+        foreach ($reflectionClass->getInterfaceNames() as $interfaceName) {
+            $implements[$interfaceName] = new IdentifierTypeNode($interfaceName);
+        }
+
+        $parameters = [];
+        $parameterIdx = 0;
+
+        foreach ($parser->parse($tokens)->getTags() as $tag) {
+            if ($tag->value instanceof TemplateTagValueNode) {
+                $parameters[$tag->value->name] = [
+                    'order' => $parameterIdx++,
+                    'bound' => $tag->value->bound,
+                    'variance' => match (true) {
+                        str_ends_with($tag->name, '-covariant') => 'out',
+                        str_ends_with($tag->name, '-contravariant') => 'in',
+                        default => 'inout',
+                    },
+                ];
+
+            } elseif ($tag->value instanceof ExtendsTagValueNode) {
+                $extends = $tag->value->type;
+
+            } elseif ($tag->value instanceof ImplementsTagValueNode) {
+                $implements[$tag->value->type->type->name] = $tag->value->type;
+            }
+        }
+    }
+
+    private static function createGenericTypeResolver(TypeNode $type, array $parameters): Closure
+    {
+        return static function (array $types) use ($type, $parameters): TypeNode {
+            return self::resolveInner($type, static function (string $identifier) use ($types, $parameters): string {
+                if (!isset($parameters[$identifier])) {
+                    return $identifier;
+                }
+
+                $order = $parameters[$identifier]['order'];
+                return $types[$order] ?? $parameters[$identifier]['bound'] ?? 'mixed';
+            });
         };
     }
 
@@ -651,6 +712,52 @@ class PhpDocTypeUtils
         }
 
         return $type;
+    }
+
+    /**
+     * @param Closure(string): string $resolver
+     */
+    public static function resolveInner(mixed& $type, Closure $resolver): void
+    {
+        if (is_array($type)) {
+            foreach ($type as &$item) {
+                self::resolveInner($item, $resolver);
+            }
+
+        } elseif ($type instanceof IdentifierTypeNode) {
+            $type = $resolver($type->name);
+
+        } elseif ($type instanceof ArrayShapeItemNode) {
+            self::resolveInner($type->valueType, $resolver); // intentionally not resolving key type
+
+        } elseif (is_object($type)) {
+            foreach (get_object_vars($type) as $item) {
+                self::resolveInner($item, $resolver);
+            }
+        }
+    }
+
+    /**
+     * @param Closure(string): string $resolver
+     */
+    public static function resolveInner(mixed $type, Closure $resolver): void
+    {
+        if (is_array($type)) {
+            foreach ($type as &$item) {
+                self::resolveInner($item, $resolver);
+            }
+
+        } elseif ($type instanceof IdentifierTypeNode) {
+            $type = $resolver($type->name);
+
+        } elseif ($type instanceof ArrayShapeItemNode) {
+            self::resolveInner($type->valueType, $resolver); // intentionally not resolving key type
+
+        } elseif (is_object($type)) {
+            foreach (get_object_vars($type) as $item) {
+                self::resolveInner($item, $resolver);
+            }
+        }
     }
 
 }
