@@ -654,6 +654,46 @@ class PhpDocTypeUtilsTest extends InputMapperTestCase
             ],
         ];
 
+        yield 'class-string' => [
+            'true' => [
+                'class-string',
+                'class-string<object>',
+                'class-string<stdClass>',
+                'class-string<DateTimeInterface>',
+            ],
+
+            'false' => [
+                'string',
+                'int',
+            ],
+        ];
+
+        yield 'class-string<object>' => [
+            'true' => [
+                'class-string<stdClass>',
+                'class-string<object>',
+                'class-string',
+            ],
+
+            'false' => [
+                'string',
+            ],
+        ];
+
+        yield 'class-string<DateTimeInterface>' => [
+            'true' => [
+                'class-string<DateTimeInterface>',
+                'class-string<DateTimeImmutable>',
+            ],
+
+            'false' => [
+                'string',
+                'class-string',
+                'class-string<stdClass>',
+                'class-string<object>',
+            ],
+        ];
+
         yield 'double' => [
             'true' => [
                 'float',
@@ -862,6 +902,8 @@ class PhpDocTypeUtilsTest extends InputMapperTestCase
                 'string',
                 '"abc"',
                 'DateTimeImmutable::RFC3339',
+                'class-string',
+                'class-string<stdClass>',
             ],
 
             'false' => [

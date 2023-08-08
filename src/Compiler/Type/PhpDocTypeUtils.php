@@ -324,6 +324,12 @@ class PhpDocTypeUtils
                     default => false,
                 },
 
+                'class-string' => match (true) {
+                    $a instanceof IdentifierTypeNode => $a->name === 'class-string',
+                    $a instanceof GenericTypeNode => $a->type->name === 'class-string',
+                    default => false,
+                },
+
                 'false' => match (true) {
                     $a instanceof IdentifierTypeNode => $a->name === 'false',
                     $a instanceof ConstTypeNode => match (true) {
@@ -385,7 +391,8 @@ class PhpDocTypeUtils
                 'resource' => $a instanceof IdentifierTypeNode && $a->name === 'resource',
 
                 'string' => match (true) {
-                    $a instanceof IdentifierTypeNode => $a->name === 'string',
+                    $a instanceof IdentifierTypeNode => ($a->name === 'string' || $a->name === 'class-string'),
+                    $a instanceof GenericTypeNode => $a->type->name === 'class-string',
                     $a instanceof ConstTypeNode => match (true) {
                         $a->constExpr instanceof ConstExprStringNode => true,
                         $a->constExpr instanceof ConstFetchNode => is_string(constant((string) $a->constExpr)),
@@ -406,7 +413,7 @@ class PhpDocTypeUtils
 
                 'void' => $a instanceof IdentifierTypeNode && $a->name === 'void',
 
-                default => false,
+                default => $a instanceof IdentifierTypeNode && $a->name === $b->name,
             };
         }
 
@@ -494,6 +501,12 @@ class PhpDocTypeUtils
                 'parameters' => [
                     ['variance' => 'out'],
                     ['variance' => 'out'],
+                ],
+            ],
+
+            'class-string' => [
+                'parameters' => [
+                    ['variance' => 'out', 'bound' => new IdentifierTypeNode('object')],
                 ],
             ],
 
